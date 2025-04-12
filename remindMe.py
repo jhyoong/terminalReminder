@@ -7,6 +7,24 @@ import argparse
 from threading import Timer
 import platform
 import os
+import logging
+from pathlib import Path
+
+# Set up logging
+log_dir = os.path.join(str(Path.home()), '.remindme')
+os.makedirs(log_dir, exist_ok=True)
+log_file = os.path.join(log_dir, 'remindme.log')
+
+# Configure logging with file handler to ensure the log file is created
+file_handler = logging.FileHandler(log_file)
+file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+
+logger = logging.getLogger('remindme')
+logger.setLevel(logging.INFO)
+logger.addHandler(file_handler)
+
+# Add a startup log entry to verify logging is working
+logger.debug("RemindMe script started")
 
 def parse_reminder(text):
     """Parse reminder text to extract the message and time."""
@@ -101,29 +119,37 @@ def notify(message):
     """Show a notification based on the platform."""
     print(f"\n\033[1m\033[93mREMINDER: {message}\033[0m")
     
+    # Log the notification
+    logger.info(f"Triggered: '{message}'")
+    
     # Platform-specific notifications
     if platform.system() == "Windows":
         try:
             windows_notification(message)
-        except:
-            pass  # Fail silently
+        except Exception as e:
+            logger.error(f"Windows notification failed: {str(e)}")
     else:
         try:
             unix_notification(message)
-        except:
-            pass  # Fail silently
+        except Exception as e:
+            logger.error(f"Unix notification failed: {str(e)}")
 
 def set_reminder(seconds, message):
     """Set a reminder to trigger after the specified number of seconds."""
     if seconds is None or seconds <= 0:
         print("Invalid time specified.")
+        logger.error("Invalid time specified")
         return
     
     print(f"Reminder set: '{message}' in {format_time(seconds)}")
     
     # Calculate and show the exact time when the reminder will trigger
     trigger_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
+    trigger_time_str = trigger_time.strftime('%Y-%m-%d %H:%M:%S')
     print(f"Will remind at: {trigger_time.strftime('%H:%M:%S')}")
+    
+    # Log the set reminder with the trigger time
+    logger.info(f"Set to trigger at {trigger_time_str}: '{message}'")
     
     timer = Timer(seconds, lambda: notify(message))
     timer.daemon = True  # Allow the program to exit even if timer is running
@@ -150,6 +176,7 @@ def set_reminder(seconds, message):
     except KeyboardInterrupt:
         timer.cancel()
         print("\nReminder cancelled.")
+        logger.info("Reminder cancelled by user")
 
 def format_time(seconds):
     """Format time in a human-readable way."""
@@ -170,36 +197,81 @@ def format_time(seconds):
         else:
             return f"{hours} hours and {minutes} minutes"
 
-def main():
-    parser = argparse.ArgumentParser(description='Set a reminder from the command line.')
-    parser.add_argument('reminder', nargs='+', help='The reminder text and time (e.g., "buy milk at 3pm" or "call mom in 30 minutes")')
-    
-    # If no arguments are provided, show help
-    if len(sys.argv) == 1:
-        parser.print_help()
-        sys.exit(1)
+def view_logs(count=10):
+    """View the most recent log entries."""
+    try:
+        if not os.path.exists(log_file):
+            print(f"No log file found at {log_file}")
+            return
+            
+        with open(log_file, 'r') as f:
+            lines = f.readlines()
+            
+        if not lines:
+            print("Log file exists but is empty.")
+            return
+            
+        # Show the last N entries
+        print(f"\nRecent reminder log entries (from {log_file}):")
+        print("---------------------------------------------------")
         
-    args = parser.parse_args()
-    
-    # Join all args to form the complete reminder text
-    reminder_text = ' '.join(args.reminder)
+        # If there are fewer lines than requested, show all of them
+        display_count = min(count, len(lines))
+        
+        for line in lines[-display_count:]:
+            print(line.strip())
+            
+    except Exception as e:
+        print(f"Error reading log file: {str(e)}")
+
+def process_reminder(reminder_text):
+    """Process a reminder request."""
+    # Log the input
+    logger.info(f"Reminder requested with input: '{reminder_text}'")
     
     # Parse the reminder text
     time_info = parse_reminder(reminder_text)
     
     if not time_info:
         print("Could not understand the time format. Please use 'at HH:MM' or 'in X minutes/hours/seconds'.")
-        sys.exit(1)
-    
+        logger.error(f"Failed to parse reminder: '{reminder_text}'")
+        return False
+
     # Calculate when to trigger the reminder
     seconds_until = calculate_seconds_until(time_info)
     
     if seconds_until is None:
         print("Could not calculate when to trigger the reminder.")
-        sys.exit(1)
+        logger.error("Failed to calculate trigger time")
+        return False
     
     # Set the reminder
     set_reminder(seconds_until, time_info['message'])
+    return True
+
+def main():
+    # Create the argument parser
+    parser = argparse.ArgumentParser(description='Set a reminder from the command line.')
+    
+    # Add the optional log argument
+    parser.add_argument('--log', action='store_true', help='View log entries')
+    
+    # Parse known args first to check for --log
+    args, unknown = parser.parse_known_args()
+    
+    # If --log is specified, show logs and exit
+    if args.log:
+        view_logs()
+        return
+    
+    # Handle the case for setting a reminder
+    if unknown:
+        # Join all remaining arguments to form the complete reminder text
+        reminder_text = ' '.join(unknown)
+        process_reminder(reminder_text)
+    else:
+        # If no arguments are provided, show help
+        parser.print_help()
 
 if __name__ == "__main__":
     # Print a welcome message
@@ -213,5 +285,9 @@ if __name__ == "__main__":
         except ImportError:
             print("Note: For enhanced Windows notifications, install the win10toast package:")
             print("      pip install win10toast")
+    
+    # Print log file location
+    print(f"Log file: {log_file}")
+    print("---------------------------------------------------")
     
     main()
