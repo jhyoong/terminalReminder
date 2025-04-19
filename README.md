@@ -18,7 +18,7 @@ A cross-platform command-line reminder utility that should work on Windows, macO
 
 ### Windows Setup
 
-1. Download the `remindMe.py` and `reminder_notifier.py` scripts to a convenient location (e.g., `C:\Tools\terminalReminder\`)
+1. Download the `remindMe.py` and `reminderNotifier.py` scripts to a convenient location (e.g., `C:\Tools\terminalReminder\`)
 2. Create a batch file for easy access:
    - Create a new text file named `remindme.bat`
    - Add the following content (replace the path with your actual path):
@@ -157,3 +157,4 @@ The application maintains a log file at:
 - ~~Current script hogs the terminal - to change implementation method~~
 - ~~Fix windows, and perhaps link to quick cmd run win+r~~
 - Add more parsing support for reminders beyond the day
+- Perhaps shift out reminderNotifier as shell script for macOS/Linux, compare resources used.
