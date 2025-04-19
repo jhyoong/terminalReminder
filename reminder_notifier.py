@@ -31,7 +31,7 @@ def load_reminders():
     except FileNotFoundError:
         return []
     except json.JSONDecodeError:
-        logger.error("Error deciding reminders JSON. Check file.")
+        logger.error("Error decoding reminders JSON. Check file.")
         return []
 
 def save_reminders(reminders):

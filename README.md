@@ -120,7 +120,7 @@ The application maintains a log file at:
 - If notifications don't appear, make sure you've installed the `win10toast` package
 - If you're using an older version of Windows, the script will fall back to using MessageBox notifications
 
-### macOS/
+### macOS
 
 - If notifications don't appear, check if `osascript` works in terminal.
 
