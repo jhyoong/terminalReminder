@@ -16,14 +16,10 @@ A cross-platform command-line reminder utility that should work on Windows, macO
 
 - Python 3.6 or higher
 
-### Windows Setup (WIP)
+### Windows Setup
 
-1. Download the `remindMe.py` script to a convenient location
-2. Install the optional dependency for enhanced notifications:
-   ```
-   pip install win10toast
-   ```
-3. Create a batch file for easy access:
+1. Download the `remindMe.py` and `reminder_notifier.py` scripts to a convenient location (e.g., `C:\Tools\terminalReminder\`)
+2. Create a batch file for easy access:
    - Create a new text file named `remindme.bat`
    - Add the following content (replace the path with your actual path):
      ```
@@ -32,10 +28,28 @@ A cross-platform command-line reminder utility that should work on Windows, macO
      ```
    - Save the file in a directory that's in your PATH (e.g., `C:\Windows`)
 
-4. Alternatively, you can create a PowerShell function by adding this to your PowerShell profile:
+3. Alternatively, you can create a PowerShell function by adding this to your PowerShell profile:
    ```powershell
    function remindme { python C:\path\to\remindMe.py $args }
    ```
+
+4. For Windows Run (Win+R) access:
+   - Create a new batch file named `remindme.bat` with the following content:
+     ```
+     @echo off
+     python "C:\full\path\to\remindMe.py" %*
+     pause
+     ```
+   - Place this batch file in a location that is in your system PATH
+     - To check your PATH directories, open Command Prompt and type: `echo %PATH%`
+     - Or create a directory like `C:\bin\` and add it to your PATH:
+       1. Search for "Environment Variables" in the Start menu
+       2. Click "Edit the system environment variables"
+       3. Click "Environment Variables" button
+       4. Under "System variables" or "User variables", find "Path" and click "Edit"
+       5. Click "New" and add the directory path (e.g., `C:\bin\`)
+       6. Click "OK" on all dialogs to save changes
+   - Now you can use Win+R, type `remindme your message here in 5 minutes`, and press Enter
 
 ### macOS Setup
 
@@ -115,12 +129,16 @@ The application maintains a log file at:
 
 ## Troubleshooting
 
-### Windows-Specific Issues (WIP)
+### Windows-Specific Issues
 
-- If notifications don't appear, make sure you've installed the `win10toast` package
+- If the script doesn't run from the Run dialog (Win+R), check that:
+  1. The batch file is in a directory that's in your system PATH
+  2. All paths in the batch file have the correct and full path to the Python script
+  3. Python is in your system PATH (try typing `python --version` in Command Prompt)
+
 - If you're using an older version of Windows, the script will fall back to using MessageBox notifications
 
-### macOS
+### macOS Issues
 
 - If notifications don't appear, check if `osascript` works in terminal.
 
@@ -137,5 +155,5 @@ The application maintains a log file at:
 ## TODOs
 
 - ~~Current script hogs the terminal - to change implementation method~~
-- Fix windows, and perhaps link to quick cmd run win+r
+- ~~Fix windows, and perhaps link to quick cmd run win+r~~
 - Add more parsing support for reminders beyond the day
