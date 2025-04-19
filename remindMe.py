@@ -4,10 +4,11 @@ import re
 import time
 import datetime
 import argparse
-from threading import Timer
 import platform
 import os
 import logging
+import json
+import subprocess
 from pathlib import Path
 
 # Set up logging
@@ -25,6 +26,23 @@ logger.addHandler(file_handler)
 
 # Add a startup log entry to verify logging is working
 logger.debug("RemindMe script started")
+
+# Path to JSON store
+reminders_file = os.path.json(log_dir, 'reminders.json')
+
+def load_reminders():
+    try:
+        with open(reminders_file, 'r') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return []
+    except json.JSONDecodeError:
+        logger.error("Error decoding reminders from JSON store. Check file.")
+        return []
+
+def save_reminders(reminders):
+    with open(reminders_file, 'w') as f:
+        json.dump(reminders, f, indent=4)
 
 def parse_reminder(text):
     """Parse reminder text to extract the message and time."""
@@ -95,89 +113,6 @@ def calculate_seconds_until(time_info):
         else:
             return None
 
-def windows_notification(message):
-    """Show a notification in Windows."""
-    try:
-        # Using Windows native notification
-        from win10toast import ToastNotifier
-        toaster = ToastNotifier()
-        toaster.show_toast("Reminder", message, duration=10)
-    except ImportError:
-        # Fallback if win10toast is not installed
-        import ctypes
-        ctypes.windll.user32.MessageBoxW(0, message, "Reminder", 0x40)
-
-def unix_notification(message):
-    """Show a notification in Unix-based systems."""
-    # Try to use the 'notify-send' command if available
-    try:
-        os.system(f'notify-send "Reminder" "{message}"')
-    except:
-        pass  # Fail silently if notify-send is not available
-
-def notify(message):
-    """Show a notification based on the platform."""
-    print(f"\n\033[1m\033[93mREMINDER: {message}\033[0m")
-    
-    # Log the notification
-    logger.info(f"Triggered: '{message}'")
-    
-    # Platform-specific notifications
-    if platform.system() == "Windows":
-        try:
-            windows_notification(message)
-        except Exception as e:
-            logger.error(f"Windows notification failed: {str(e)}")
-    else:
-        try:
-            unix_notification(message)
-        except Exception as e:
-            logger.error(f"Unix notification failed: {str(e)}")
-
-def set_reminder(seconds, message):
-    """Set a reminder to trigger after the specified number of seconds."""
-    if seconds is None or seconds <= 0:
-        print("Invalid time specified.")
-        logger.error("Invalid time specified")
-        return
-    
-    print(f"Reminder set: '{message}' in {format_time(seconds)}")
-    
-    # Calculate and show the exact time when the reminder will trigger
-    trigger_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds)
-    trigger_time_str = trigger_time.strftime('%Y-%m-%d %H:%M:%S')
-    print(f"Will remind at: {trigger_time.strftime('%H:%M:%S')}")
-    
-    # Log the set reminder with the trigger time
-    logger.info(f"Set to trigger at {trigger_time_str}: '{message}'")
-    
-    timer = Timer(seconds, lambda: notify(message))
-    timer.daemon = True  # Allow the program to exit even if timer is running
-    timer.start()
-    
-    # Keep the script running until the reminder triggers
-    try:
-        # Wait for the timer to complete
-        remaining = seconds
-        while remaining > 0 and timer.is_alive():
-            time.sleep(min(1, remaining))
-            remaining -= 1
-            
-            # Clear the last line and show a progress update every 15 seconds
-            if remaining % 15 == 0 and remaining > 0:
-                # Use carriage return to overwrite the line
-                sys.stdout.write(f"\rTime remaining: {format_time(remaining)}    ")
-                sys.stdout.flush()
-        
-        # Ensure we wait for the notification to be processed
-        if timer.is_alive():
-            timer.join(1)
-            
-    except KeyboardInterrupt:
-        timer.cancel()
-        print("\nReminder cancelled.")
-        logger.info("Reminder cancelled by user")
-
 def format_time(seconds):
     """Format time in a human-readable way."""
     if seconds < 60:
@@ -224,6 +159,37 @@ def view_logs(count=10):
     except Exception as e:
         print(f"Error reading log file: {str(e)}")
 
+def is_notifier_running():
+    """Check if reminder_notifier.py is running."""
+    # TODO: Need windows check too
+    try:
+        # Using pgrep to find the process
+        process = subprocess.run(['pgrep', '-f', 'reminder_notifier.py'], capture_output=True, text=True, check=True)
+        return bool(process.stdout.strip())
+    except subprocess.CalledProcessError:
+        return False
+    except FileNotFoundError:
+        print("Error: pgrep not found. Please install it (e.g., 'sudo apt-get install procps' on Debian/Ubuntu/MacOS).")
+        return False
+
+def start_notifier_script():
+    """Starts reminder_notifier.py script in background"""
+    try:
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reminder_notifier.py")
+        if os.path.exists(script_path):
+            if platform.system() == "Windows":
+                subprocess.Popen(['python', script_path], creationflags=subprocess.CREATE_NEW_CONSOLE)
+            else:
+                subprocess.Popen(['python', script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            logger.info("reminder_notifier.py script started in background.")
+            print("Reminder service started in background.")
+        else:
+            print("Reminder service script not found.")
+
+    except Exception as e:
+        logger.error(f"Error starting reminder_notifier.py: {e}")
+        print(f"Error: {e}")
+
 def process_reminder(reminder_text):
     """Process a reminder request."""
     # Log the input
@@ -245,8 +211,26 @@ def process_reminder(reminder_text):
         logger.error("Failed to calculate trigger time")
         return False
     
-    # Set the reminder
-    set_reminder(seconds_until, time_info['message'])
+    trigger_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds_until)
+    trigger_time_str = trigger_time.strftime('%Y-%m-%d %H:%M:%S')
+
+    # Prepare reminder data
+    reminder_data = {
+        'timestamp': datetime.datetime.now().isoformat(),
+        'trigger_time': trigger_time.isoformat(),
+        'message': time_info['message'],
+        'full_command': full_command
+    }
+
+    # Load existing reminders, append the new one, save
+    reminders = load_reminders()
+    reminders.append(reminder_data)
+    save_reminders(reminders)
+
+    print(f"Reminder set: '{time_info['message']}' in {format_time(seconds_until)}")
+    print(f"Will reminder at: {trigger_time.strftime('%H:%M:%S')}")
+    logger.info(f"Reminder saved to trigger at {trigger_time_str}: '{time_info['message']}'")
+
     return True
 
 def main():
@@ -263,12 +247,17 @@ def main():
     if args.log:
         view_logs()
         return
+
+    # Check if notifier script is running, start if not
+    if not is_notifier_running():
+        start_notifier_script()
     
     # Handle the case for setting a reminder
     if unknown:
         # Join all remaining arguments to form the complete reminder text
         reminder_text = ' '.join(unknown)
-        process_reminder(reminder_text)
+        full_command = ' '.join(sys.argv)
+        process_reminder(reminder_text, full_command)
     else:
         # If no arguments are provided, show help
         parser.print_help()
@@ -288,6 +277,7 @@ if __name__ == "__main__":
     
     # Print log file location
     print(f"Log file: {log_file}")
+    print(f"Reminder Storage: {reminders_file}")
     print("---------------------------------------------------")
     
     main()

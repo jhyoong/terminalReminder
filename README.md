@@ -1,6 +1,6 @@
 # terminalReminder
 
-A cross-platform command-line reminder utility that should work on Windows, macOS, and Linux.
+A cross-platform command-line reminder utility that should work on Windows, macOS, and Linux. (WIP)
 
 ## Features
 
@@ -16,9 +16,9 @@ A cross-platform command-line reminder utility that should work on Windows, macO
 
 - Python 3.6 or higher
 
-### Windows Setup
+### Windows Setup (WIP)
 
-1. Download the `remindme.py` script to a convenient location
+1. Download the `remindMe.py` script to a convenient location
 2. Install the optional dependency for enhanced notifications:
    ```
    pip install win10toast
@@ -28,37 +28,37 @@ A cross-platform command-line reminder utility that should work on Windows, macO
    - Add the following content (replace the path with your actual path):
      ```
      @echo off
-     python C:\path\to\remindme.py %*
+     python C:\path\to\remindMe.py %*
      ```
    - Save the file in a directory that's in your PATH (e.g., `C:\Windows`)
 
 4. Alternatively, you can create a PowerShell function by adding this to your PowerShell profile:
    ```powershell
-   function remindme { python C:\path\to\remindme.py $args }
+   function remindme { python C:\path\to\remindMe.py $args }
    ```
 
 ### macOS Setup
 
-1. Download the `remindme.py` script
+1. Download the `remindMe.py` script
 2. Make it executable:
    ```
-   chmod +x remindme.py
+   chmod +x remindMe.py
    ```
 3. Create an alias by adding this line to your `~/.bash_profile` or `~/.zshrc`:
    ```
-   alias remindme="python3 /path/to/remindme.py"
+   alias remindme="python3 /path/to/remindMe.py"
    ```
 
 ### Linux Setup
 
-1. Download the `remindme.py` script
+1. Download the `remindMe.py` script
 2. Make it executable:
    ```
-   chmod +x remindme.py
+   chmod +x remindMe.py
    ```
 3. Create an alias by adding this line to your `~/.bashrc` or `~/.zshrc`:
    ```
-   alias remindme="python3 /path/to/remindme.py"
+   alias remindme="python3 /path/to/remindMe.py"
    ```
 4. For desktop notifications, install `libnotify-bin` if it's not already installed:
    ```
@@ -115,12 +115,16 @@ The application maintains a log file at:
 
 ## Troubleshooting
 
-### Windows-Specific Issues
+### Windows-Specific Issues (WIP)
 
 - If notifications don't appear, make sure you've installed the `win10toast` package
 - If you're using an older version of Windows, the script will fall back to using MessageBox notifications
 
-### macOS/Linux Issues
+### macOS/
+
+- If notifications don't appear, check if `osascript` works in terminal.
+
+### Linux Issues
 
 - If notifications don't appear, check if your desktop environment supports `notify-send` 
 - The reminder will still display in the terminal even if system notifications fail
@@ -132,4 +136,6 @@ The application maintains a log file at:
 
 ## TODOs
 
-- Current script hogs the terminal - to change implementation method
+- ~~Current script hogs the terminal - to change implementation method~~
+- Fix windows, and perhaps link to quick cmd run win+r
+- Add more parsing support for reminders beyond the day
