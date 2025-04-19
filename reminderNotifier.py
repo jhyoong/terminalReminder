@@ -11,16 +11,30 @@ from pathlib import Path
 log_dir = os.path.join(str(Path.home()), '.remindme')
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, 'remindme.log')
+history_log_file = os.path.join(log_dir, 'reminderHistory.log')
 
 # Configure logging with file handler to ensure the log file is created
 file_handler = logging.FileHandler(log_file)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
+# Custom filter for reminder history logs
+class ReminderHistoryFilter(logging.Filter):
+    def filter(self, record):
+        return ('Reminder saved to trigger at' in record.getMessage() or 
+                'Triggered:' in record.getMessage())
+
+# Set up history log handler with custom filter
+history_handler = logging.FileHandler(history_log_file)
+history_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+history_handler.setLevel(logging.INFO)
+history_handler.addFilter(ReminderHistoryFilter())
+
 logger = logging.getLogger('remindme_notifier')
 logger.setLevel(logging.INFO)
 logger.addHandler(file_handler)
+logger.addHandler(history_handler)
 
-# Add a startup log entry to verify logging is working
+# Path to JSON store
 reminders_file = os.path.join(log_dir, 'reminders.json')
 
 def load_reminders():
@@ -42,7 +56,7 @@ def save_reminders(reminders):
 def windows_notification(message):
     try:
         import ctypes
-        cytpes.windll.user32.MessageBoxW(0, message, "Reminder", 0x40)
+        ctypes.windll.user32.MessageBoxW(0, message, "Reminder", 0x40)
     except Exception as e:
         logger.error(f"Windows notification failed: {str(e)}")
 
@@ -85,25 +99,33 @@ def notify(message):
     else:
         logger.error(f"Unsupported platform: {system}")
 
-def main():
-    while True:
-        reminders = load_reminders()
-        now = datetime.datetime.now()
+def main():    
+    logger.info("Reminder notifier started")
+    print("Reminder notifier running in background...")
+    
+    try:
+        while True:
+            reminders = load_reminders()
+            now = datetime.datetime.now()
 
-        reminders_to_remove = []
-        for i, reminder in enumerate(reminders):
-            trigger_time = datetime.datetime.fromisoformat(reminder['trigger_time'])
-            if trigger_time <= now:
-                notify(reminder['message'])
-                reminders_to_remove.append(i)
-                logger.info(f"Triggered {reminder['message']}")
+            reminders_to_remove = []
+            for i, reminder in enumerate(reminders):
+                trigger_time = datetime.datetime.fromisoformat(reminder['trigger_time'])
+                if trigger_time <= now:
+                    notify(reminder['message'])
+                    reminders_to_remove.append(i)
+                    logger.info(f"Triggered {reminder['message']}")
 
-        # Remove triggered reminders in reverse order to avoid indexing issues
-        for index in reversed(reminders_to_remove):
-            del reminders[index]
-        
-        save_reminders(reminders)
-        time.sleep(1) # to avoid too frequent calls
+            # Remove triggered reminders in reverse order to avoid indexing issues
+            for index in reversed(reminders_to_remove):
+                del reminders[index]
+            
+            save_reminders(reminders)
+            time.sleep(1) # to avoid too frequent calls
+    except KeyboardInterrupt:
+        logger.info("Notifier terminated by user")
+    except Exception as e:
+        logger.error(f"Error in notifier: {e}")
 
 if __name__ == "__main__":
     main()

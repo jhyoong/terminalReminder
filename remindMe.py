@@ -15,20 +15,37 @@ from pathlib import Path
 log_dir = os.path.join(str(Path.home()), '.remindme')
 os.makedirs(log_dir, exist_ok=True)
 log_file = os.path.join(log_dir, 'remindme.log')
+history_log_file = os.path.join(log_dir, 'reminderHistory.log')
 
 # Configure logging with file handler to ensure the log file is created
 file_handler = logging.FileHandler(log_file)
 file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
 
+# Custom filter for reminder history logs
+class ReminderHistoryFilter(logging.Filter):
+    def filter(self, record):
+        return ('Reminder saved to trigger at' in record.getMessage() or 
+                'Triggered:' in record.getMessage())
+
+# Set up history log handler with custom filter
+history_handler = logging.FileHandler(history_log_file)
+history_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
+history_handler.setLevel(logging.INFO)
+history_handler.addFilter(ReminderHistoryFilter())
+
 logger = logging.getLogger('remindme')
 logger.setLevel(logging.INFO)
 logger.addHandler(file_handler)
+logger.addHandler(history_handler)
 
 # Add a startup log entry to verify logging is working
 logger.debug("RemindMe script started")
 
-# Path to JSON store
-reminders_file = os.path.json(log_dir, 'reminders.json')
+# Path to JSON store - Fix: os.path.json to os.path.join
+reminders_file = os.path.join(log_dir, 'reminders.json')
+
+# Create a lock file to prevent multiple instances
+lock_file = os.path.join(log_dir, 'notifier.lock')
 
 def load_reminders():
     try:
@@ -132,14 +149,16 @@ def format_time(seconds):
         else:
             return f"{hours} hours and {minutes} minutes"
 
-def view_logs(count=10):
+def view_logs(count=10, history=False):
     """View the most recent log entries."""
     try:
-        if not os.path.exists(log_file):
-            print(f"No log file found at {log_file}")
+        log_path = history_log_file if history else log_file
+        
+        if not os.path.exists(log_path):
+            print(f"No log file found at {log_path}")
             return
             
-        with open(log_file, 'r') as f:
+        with open(log_path, 'r') as f:
             lines = f.readlines()
             
         if not lines:
@@ -147,7 +166,8 @@ def view_logs(count=10):
             return
             
         # Show the last N entries
-        print(f"\nRecent reminder log entries (from {log_file}):")
+        log_type = "reminder history" if history else "reminder log"
+        print(f"\nRecent {log_type} entries (from {log_path}):")
         print("---------------------------------------------------")
         
         # If there are fewer lines than requested, show all of them
@@ -160,37 +180,113 @@ def view_logs(count=10):
         print(f"Error reading log file: {str(e)}")
 
 def is_notifier_running():
-    """Check if reminder_notifier.py is running."""
-    # TODO: Need windows check too
-    try:
-        # Using pgrep to find the process
-        process = subprocess.run(['pgrep', '-f', 'reminder_notifier.py'], capture_output=True, text=True, check=True)
-        return bool(process.stdout.strip())
-    except subprocess.CalledProcessError:
-        return False
-    except FileNotFoundError:
-        print("Error: pgrep not found. Please install it (e.g., 'sudo apt-get install procps' on Debian/Ubuntu/MacOS).")
-        return False
+    """Check if reminderNotifier.py is running."""
+    print("Checking if notifier is running....")
+    # First check if lock file exists
+    if os.path.exists(lock_file):
+        try:
+            # Read the process ID from the lock file
+            with open(lock_file, 'r') as f:
+                pid = int(f.read().strip())
+            
+            # Check if the process with that PID is still running
+            if platform.system() == "Windows":
+                try:
+                    # Using Windows tasklist command to check if process exists
+                    output = subprocess.check_output(["tasklist", "/FI", f"PID eq {pid}", "/NH"], 
+                                                    creationflags=subprocess.CREATE_NO_WINDOW,
+                                                    stderr=subprocess.DEVNULL)
+                    print(f"This is {str(pid) in output.decode()}")
+                    return str(pid) in output.decode()
+                except Exception:
+                    return False
+            else:
+                # On Unix-like systems, we can check if the process exists
+                try:
+                    os.kill(pid, 0)  # Signal 0 doesn't kill the process, just checks if it exists
+                    return True
+                except OSError:
+                    return False
+        except Exception as e:
+            logger.error(f"Error checking process status: {e}")
+            # If there's an error, assume it's not running and remove the lock file
+            try:
+                os.remove(lock_file)
+            except:
+                pass
+            return False
+    
+    # If we get here, either there's no lock file or we couldn't verify the process
+    # Do a more thorough check based on platform
+    if platform.system() == "Windows":
+        try:
+            # On Windows, check if any python process is running reminderNotifier.py
+            # Using WMIC for more reliable process info
+            output = subprocess.check_output(
+                ["wmic", "process", "where", "caption='python.exe'", "get", "commandline", "/format:list"],
+                creationflags=subprocess.CREATE_NO_WINDOW,
+                stderr=subprocess.DEVNULL,
+                text=True
+            )
+            return "reminderNotifier.py" in output
+        except Exception as e:
+            logger.error(f"Error checking for notifier process: {e}")
+            return False
+    else:
+        try:
+            # Using pgrep to find the process
+            process = subprocess.run(['pgrep', '-f', 'reminderNotifier.py'], 
+                                    capture_output=True, text=True)
+            return bool(process.stdout.strip())
+        except subprocess.CalledProcessError:
+            return False
+        except FileNotFoundError:
+            print("Error: pgrep not found. Please install it (e.g., 'sudo apt-get install procps' on Debian/Ubuntu/MacOS).")
+            return False
 
 def start_notifier_script():
-    """Starts reminder_notifier.py script in background"""
+    """Starts reminderNotifier.py script in background"""
     try:
-        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reminder_notifier.py")
-        if os.path.exists(script_path):
-            if platform.system() == "Windows":
-                subprocess.Popen(['python', script_path], creationflags=subprocess.CREATE_NEW_CONSOLE)
-            else:
-                subprocess.Popen(['python', script_path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            logger.info("reminder_notifier.py script started in background.")
-            print("Reminder service started in background.")
+        script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reminderNotifier.py")
+        
+        if not os.path.exists(script_path):
+            print(f"Error: Cannot find reminderNotifier.py at {script_path}")
+            logger.error(f"reminderNotifier.py not found at {script_path}")
+            return False
+            
+        if platform.system() == "Windows":
+            # Hide the console window when starting the process
+            startupinfo = subprocess.STARTUPINFO()
+            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+            
+            process = subprocess.Popen(
+                ['python', script_path], 
+                startupinfo=startupinfo, 
+                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE
+            )
         else:
-            print("Reminder service script not found.")
+            process = subprocess.Popen(
+                ['python', script_path], 
+                stdout=subprocess.DEVNULL, 
+                stderr=subprocess.DEVNULL
+            )
+        
+        # Create a lock file with the process ID
+        with open(lock_file, 'w') as f:
+            f.write(str(process.pid))
+            
+        logger.info(f"reminderNotifier.py script started in background with PID {process.pid}.")
+        print("Reminder service started in background.")
+        return True
 
     except Exception as e:
-        logger.error(f"Error starting reminder_notifier.py: {e}")
-        print(f"Error: {e}")
+        logger.error(f"Error starting reminderNotifier.py: {e}")
+        print(f"Error starting reminder service: {e}")
+        return False
 
-def process_reminder(reminder_text):
+def process_reminder(reminder_text, full_command):
     """Process a reminder request."""
     # Log the input
     logger.info(f"Reminder requested with input: '{reminder_text}'")
@@ -228,7 +324,7 @@ def process_reminder(reminder_text):
     save_reminders(reminders)
 
     print(f"Reminder set: '{time_info['message']}' in {format_time(seconds_until)}")
-    print(f"Will reminder at: {trigger_time.strftime('%H:%M:%S')}")
+    print(f"Will remind at: {trigger_time.strftime('%H:%M:%S')}")
     logger.info(f"Reminder saved to trigger at {trigger_time_str}: '{time_info['message']}'")
 
     return True
@@ -237,15 +333,21 @@ def main():
     # Create the argument parser
     parser = argparse.ArgumentParser(description='Set a reminder from the command line.')
     
-    # Add the optional log argument
+    # Add the optional log arguments
     parser.add_argument('--log', action='store_true', help='View log entries')
+    parser.add_argument('--history', action='store_true', help='View reminder history logs')
     
-    # Parse known args first to check for --log
+    # Parse known args first to check for --log and --history
     args, unknown = parser.parse_known_args()
     
     # If --log is specified, show logs and exit
     if args.log:
-        view_logs()
+        view_logs(history=False)
+        return
+
+    # If --history is specified, show history logs and exit
+    if args.history:
+        view_logs(history=True)
         return
 
     # Check if notifier script is running, start if not
@@ -267,16 +369,9 @@ if __name__ == "__main__":
     print("Reminder Tool - Cross-platform CLI reminder utility")
     print("---------------------------------------------------")
     
-    # Check for dependencies on Windows
-    if platform.system() == "Windows":
-        try:
-            import win10toast
-        except ImportError:
-            print("Note: For enhanced Windows notifications, install the win10toast package:")
-            print("      pip install win10toast")
-    
     # Print log file location
     print(f"Log file: {log_file}")
+    print(f"History log file: {history_log_file}")
     print(f"Reminder Storage: {reminders_file}")
     print("---------------------------------------------------")
     
