@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
 import sys
 import re
-import time
 import datetime
 import argparse
 import platform
@@ -9,6 +8,7 @@ import os
 import logging
 import json
 import subprocess
+import dateparser
 from pathlib import Path
 
 # Set up logging
@@ -41,7 +41,7 @@ logger.addHandler(history_handler)
 # Add a startup log entry to verify logging is working
 logger.debug("RemindMe script started")
 
-# Path to JSON store - Fix: os.path.json to os.path.join
+# Path to JSON store
 reminders_file = os.path.join(log_dir, 'reminders.json')
 
 # Create a lock file to prevent multiple instances
@@ -61,93 +61,186 @@ def save_reminders(reminders):
     with open(reminders_file, 'w') as f:
         json.dump(reminders, f, indent=4)
 
+def extract_time_expression(text):
+    """
+    Extract time expressions from text using common patterns.
+    Returns a tuple of (time_expression, remaining_text)
+    """
+    # Common time patterns - tried to add more specific matching
+    patterns = [
+        # at/on time and date patterns - more comprehensive
+        r'(?:at|on)\s+(\d{1,2}(?:st|nd|rd|th)?(?:\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?)?(?:\s+(?:at\s+)?\d{1,2}(?::\d{2})?(?:\s*(?:am|pm))?)?)',
+        
+        # date with time patterns - more complete
+        r'(\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?(?:\s+(?:at\s+)?\d{1,2}(?::\d{2})?(?:\s*(?:am|pm))?)?)',
+        
+        # "in X minutes/hours/days" patterns
+        r'(?:in|after)\s+((?:\d+\s*(?:second|minute|hour|day|week|month|year|sec|min|hr|s|m|h|d|w|y)s?\s*(?:and\s+)?)+)',
+        
+        # simple time patterns
+        r'(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))',
+        
+        # later expressions
+        r'(later\s+(?:in|at|on)\s+\d+\s*(?:second|minute|hour|day|week|month|year|sec|min|hr|s|m|h|d|w|y)s?)',
+        
+        # by date patterns
+        r'(?:by|before)\s+(\d{1,2}(?:st|nd|rd|th)?(?:\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?)?(?:\s+(?:at\s+)?\d{1,2}(?::\d{2})?(?:\s*(?:am|pm))?)?)',
+        
+        # tomorrow, today patterns
+        r'(tomorrow(?:\s+(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?)',
+        r'(today(?:\s+(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?)',
+    ]
+    
+    original_text = text.strip()
+    
+    # Specially handle cases like "on 1 May 11am" which might be problematic
+    special_date_pattern = r'(?:on|at|by)\s+(\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?(?:\s+(?:at\s+)?\d{1,2}(?::\d{2})?(?:\s*(?:am|pm))?)?)'
+    special_match = re.search(special_date_pattern, text, re.IGNORECASE)
+    if special_match:
+        full_match = special_match.group(0)
+        remaining_text = text.replace(full_match, "").strip()
+        return full_match, remaining_text
+    
+    # Try each pattern
+    for pattern in patterns:
+        match = re.search(pattern, text, re.IGNORECASE)
+        if match:
+            # Get the full matched expression
+            full_match = match.group(0)
+            # Remove it from the original text to get remaining text
+            remaining_text = text.replace(full_match, "").strip()
+            return full_match, remaining_text
+    
+    # If no patterns matched, return the original text
+    return None, original_text
+
 def parse_reminder(text):
-    """Parse reminder text to extract the message and time."""
-    # Try to find time specified as "at HH:MM" or "at HH:MM AM/PM"
-    at_time_pattern = r'at (\d{1,2}(?::\d{2})?\s*(?:am|pm)?)'
-    at_match = re.search(at_time_pattern, text, re.IGNORECASE)
+    """
+    Parse reminder text to extract message and time using both patterns and dateparser.
+    Handles more natural language expressions.
+    """
+    # First try to extract time expression using patterns
+    time_expression, remaining_text = extract_time_expression(text)
     
-    # Try to find time specified as "in X seconds/minutes/hours"
-    in_time_pattern = r'in (\d+)\s*(second|minute|hour|sec|min|s|m|h)s?'
-    in_match = re.search(in_time_pattern, text, re.IGNORECASE)
+    logger.debug(f"Extracted time expression: '{time_expression}', remaining text: '{remaining_text}'")
     
-    if at_match:
-        time_str = at_match.group(1).strip()
-        message = text.replace(at_match.group(0), "").strip()
-        return {'type': 'at', 'time_str': time_str, 'message': message}
-    elif in_match:
-        amount = int(in_match.group(1))
-        unit = in_match.group(2).lower()
-        message = text.replace(in_match.group(0), "").strip()
-        return {'type': 'in', 'amount': amount, 'unit': unit, 'message': message}
+    # Initialize trigger_time as None
+    trigger_time = None
+    
+    if time_expression:
+        # Try parsing the full time expression first
+        trigger_time = dateparser.parse(
+            time_expression, 
+            settings={
+                'PREFER_DATES_FROM': 'future',
+                'RELATIVE_BASE': datetime.datetime.now(),
+                'TIMEZONE': 'local',
+                'DATE_ORDER': 'DMY'  # Force day-month-year interpretation
+            }
+        )
+        
+        logger.debug(f"Initial parse of time expression: {trigger_time}")
+        
+        # If we didn't get a valid time or if it defaulted to midnight but contains AM/PM
+        if not trigger_time or (trigger_time.hour == 0 and trigger_time.minute == 0 and 
+                               ('am' in time_expression.lower() or 'pm' in time_expression.lower())):
+            
+            # Look for date and time components separately
+            date_match = re.search(r'(\d{1,2}(?:st|nd|rd|th)?[\s]+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?)', time_expression, re.IGNORECASE)
+            time_match = re.search(r'(\d{1,2}(?::\d{2})?[\s]*(?:am|pm))', time_expression, re.IGNORECASE)
+            
+            if date_match and time_match:
+                date_part = date_match.group(1)
+                time_part = time_match.group(1)
+                
+                logger.debug(f"Found date part: '{date_part}', time part: '{time_part}'")
+                
+                # Parse date first
+                date_obj = dateparser.parse(
+                    date_part,
+                    settings={
+                        'PREFER_DATES_FROM': 'future',
+                        'RELATIVE_BASE': datetime.datetime.now(),
+                        'TIMEZONE': 'local',
+                        'DATE_ORDER': 'DMY'
+                    }
+                )
+                
+                # Then parse time
+                time_obj = dateparser.parse(
+                    time_part,
+                    settings={
+                        'PREFER_DATES_FROM': 'future',
+                        'RELATIVE_BASE': datetime.datetime.now(),
+                        'TIMEZONE': 'local'
+                    }
+                )
+                
+                # Combine them if both were successfully parsed
+                if date_obj and time_obj:
+                    trigger_time = date_obj.replace(
+                        hour=time_obj.hour,
+                        minute=time_obj.minute,
+                        second=0
+                    )
+                    logger.debug(f"Combined date {date_obj.date()} with time {time_obj.hour}:{time_obj.minute}")
+        
+        message = remaining_text if remaining_text else "Reminder"
+        
     else:
+        # Try to parse the whole text if no specific time expression was found
+        trigger_time = dateparser.parse(
+            text, 
+            settings={
+                'PREFER_DATES_FROM': 'future',
+                'RELATIVE_BASE': datetime.datetime.now(),
+                'TIMEZONE': 'local',
+                'DATE_ORDER': 'DMY'
+            }
+        )
+        message = text
+        time_expression = text
+    
+    # If we successfully found a trigger time
+    if trigger_time:
+        logger.debug(f"Final parsed time: {trigger_time.isoformat()}")
+        return {
+            'trigger_time': trigger_time,
+            'message': message,
+            'time_expression': time_expression
+        }
+    else:
+        logger.error(f"Failed to parse time from: '{text}'")
         return None
 
-def calculate_seconds_until(time_info):
-    """Calculate the number of seconds until the reminder should trigger."""
-    if time_info['type'] == 'at':
-        # Parse the time string
-        try:
-            # Try different formats
-            formats = [
-                "%I:%M%p", "%I:%M %p", "%H:%M", "%I%p", "%I %p"
-            ]
-            
-            parsed_time = None
-            for fmt in formats:
-                try:
-                    time_str = time_info['time_str'].replace(" ", "")
-                    parsed_time = datetime.datetime.strptime(time_str, fmt).time()
-                    break
-                except ValueError:
-                    continue
-            
-            if parsed_time is None:
-                raise ValueError(f"Could not parse time: {time_info['time_str']}")
-            
-            # Get current time
-            now = datetime.datetime.now()
-            target = datetime.datetime.combine(now.date(), parsed_time)
-            
-            # If the target time is in the past, set it for tomorrow
-            if target < now:
-                target += datetime.timedelta(days=1)
-            
-            seconds_until = (target - now).total_seconds()
-            return seconds_until
-        except Exception as e:
-            print(f"Error parsing time: {e}")
-            return None
-    elif time_info['type'] == 'in':
-        # Calculate seconds based on the unit
-        unit = time_info['unit'].lower()
-        if unit in ['second', 'sec', 's']:
-            return time_info['amount']
-        elif unit in ['minute', 'min', 'm']:
-            return time_info['amount'] * 60
-        elif unit in ['hour', 'h']:
-            return time_info['amount'] * 3600
-        else:
-            return None
-
-def format_time(seconds):
-    """Format time in a human-readable way."""
-    if seconds < 60:
-        return f"{int(seconds)} seconds"
-    elif seconds < 3600:
-        minutes = int(seconds / 60)
-        remaining_seconds = int(seconds % 60)
+def format_time_until(target_time):
+    """Format the time difference between now and target time in a human-readable way."""
+    now = datetime.datetime.now()
+    seconds_until = (target_time - now).total_seconds()
+    
+    if seconds_until < 60:
+        return f"{int(seconds_until)} seconds"
+    elif seconds_until < 3600:
+        minutes = int(seconds_until / 60)
+        remaining_seconds = int(seconds_until % 60)
         if remaining_seconds == 0:
             return f"{minutes} minutes"
         else:
             return f"{minutes} minutes and {remaining_seconds} seconds"
-    else:
-        hours = int(seconds / 3600)
-        minutes = int((seconds % 3600) / 60)
+    elif seconds_until < 86400:  # Less than a day
+        hours = int(seconds_until / 3600)
+        minutes = int((seconds_until % 3600) / 60)
         if minutes == 0:
             return f"{hours} hours"
         else:
             return f"{hours} hours and {minutes} minutes"
+    else:  # Days or more
+        days = int(seconds_until / 86400)
+        hours = int((seconds_until % 86400) / 3600)
+        if hours == 0:
+            return f"{days} days"
+        else:
+            return f"{days} days and {hours} hours"
 
 def view_logs(count=10, history=False):
     """View the most recent log entries."""
@@ -287,34 +380,50 @@ def start_notifier_script():
         return False
 
 def process_reminder(reminder_text, full_command):
-    """Process a reminder request."""
+    """Process a reminder request using enhanced natural language parsing."""
     # Log the input
     logger.info(f"Reminder requested with input: '{reminder_text}'")
     
     # Parse the reminder text
-    time_info = parse_reminder(reminder_text)
+    reminder_info = parse_reminder(reminder_text)
     
-    if not time_info:
-        print("Could not understand the time format. Please use 'at HH:MM' or 'in X minutes/hours/seconds'.")
+    if not reminder_info:
+        print("Could not understand the time format. Please use natural language expressions like:")
+        print("- 'call mom at 5pm'")
+        print("- 'buy milk on 28 April'") 
+        print("- 'meeting tomorrow at 2pm'")
+        print("- 'dentist appointment on 15th May 2025 at 10am'")
+        print("- 'check oven in 30 minutes'")
         logger.error(f"Failed to parse reminder: '{reminder_text}'")
         return False
 
-    # Calculate when to trigger the reminder
-    seconds_until = calculate_seconds_until(time_info)
+    # Get the trigger time
+    trigger_time = reminder_info['trigger_time']
     
-    if seconds_until is None:
+    if trigger_time is None:
         print("Could not calculate when to trigger the reminder.")
         logger.error("Failed to calculate trigger time")
         return False
     
-    trigger_time = datetime.datetime.now() + datetime.timedelta(seconds=seconds_until)
+    # Make sure the trigger time is in the future
+    now = datetime.datetime.now()
+    if trigger_time <= now:
+        # If the time is in the past but it's the same day, assume the user meant tomorrow
+        if trigger_time.date() == now.date() and (trigger_time.hour != 0 or trigger_time.minute != 0):
+            trigger_time = trigger_time + datetime.timedelta(days=1)
+            logger.info(f"Adjusted past time to next day: {trigger_time.isoformat()}")
+        else:
+            print("The specified time appears to be in the past.")
+            logger.error(f"Trigger time in the past: {trigger_time.isoformat()}")
+            return False
+    
     trigger_time_str = trigger_time.strftime('%Y-%m-%d %H:%M:%S')
 
     # Prepare reminder data
     reminder_data = {
-        'timestamp': datetime.datetime.now().isoformat(),
+        'timestamp': now.isoformat(),
         'trigger_time': trigger_time.isoformat(),
-        'message': time_info['message'],
+        'message': reminder_info['message'],
         'full_command': full_command
     }
 
@@ -323,9 +432,10 @@ def process_reminder(reminder_text, full_command):
     reminders.append(reminder_data)
     save_reminders(reminders)
 
-    print(f"Reminder set: '{time_info['message']}' in {format_time(seconds_until)}")
-    print(f"Will remind at: {trigger_time.strftime('%H:%M:%S')}")
-    logger.info(f"Reminder saved to trigger at {trigger_time_str}: '{time_info['message']}'")
+    time_until = format_time_until(trigger_time)
+    print(f"Reminder set: '{reminder_info['message']}'")
+    print(f"Will remind at: {trigger_time.strftime('%Y-%m-%d %H:%M:%S')} (in {time_until})")
+    logger.info(f"Reminder saved to trigger at {trigger_time_str}: '{reminder_info['message']}'")
 
     return True
 
