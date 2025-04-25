@@ -40,12 +40,7 @@ A cross-platform command-line reminder utility that should work on Windows, macO
    ```
 
 4. For Windows Run (Win+R) access:
-   - Create a new batch file named `remindme.bat` with the following content:
-     ```
-     @echo off
-     python "C:\full\path\to\remindMe.py" %*
-     pause
-     ```
+   - Create a new batch file named `remindme.bat` (same as step 2)
    - Place this batch file in a location that is in your system PATH
      - To check your PATH directories, open Command Prompt and type: `echo %PATH%`
      - Or create a directory like `C:\bin\` and add it to your PATH:
