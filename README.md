@@ -28,6 +28,11 @@ A cross-platform command-line reminder utility that should work on Windows, macO
      python C:\path\to\remindMe.py %*
      ```
    - Save the file in a directory that's in your PATH (e.g., `C:\Windows`)
+   - If using Anaconda or virtual envs, change to your python executable path e.g
+     ```
+     @echo off
+     C:\path\python.exe C:\path\to\remindMe.py %*
+     ```
 
 3. Alternatively, you can create a PowerShell function by adding this to your PowerShell profile:
    ```powershell
