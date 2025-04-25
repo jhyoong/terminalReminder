@@ -6,6 +6,7 @@ A cross-platform command-line reminder utility that should work on Windows, macO
 
 - Set reminders with natural language commands
 - Supports both specific times ("at 3pm") and time intervals ("in 30 minutes")
+- Supports specific dates in the future as well ("5th May 10pm")
 - Cross-platform notifications
 - Logging system to track all reminders
 - Simple and intuitive CLI interface
