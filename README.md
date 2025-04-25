@@ -96,7 +96,7 @@ remindme buy milk at 3pm
 ```
 
 ```
-remindme check the oven in 10 seconds
+remindme find the will to live on 1st Jan 1am
 ```
 
 ### Supported Time Formats
