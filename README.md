@@ -6,6 +6,7 @@ A cross-platform command-line reminder utility that should work on Windows, macO
 
 - Set reminders with natural language commands
 - Supports both specific times ("at 3pm") and time intervals ("in 30 minutes")
+- Also supports phrases like ("on 11 April 10am") or ("at 12 May 2030 1pm")
 - Cross-platform notifications
 - Logging system to track all reminders
 - Simple and intuitive CLI interface
@@ -15,6 +16,10 @@ A cross-platform command-line reminder utility that should work on Windows, macO
 ### Prerequisites
 
 - Python 3.6 or higher
+
+```
+pip install dateparser
+```
 
 ### Windows Setup
 
@@ -26,6 +31,7 @@ A cross-platform command-line reminder utility that should work on Windows, macO
      @echo off
      python C:\path\to\remindMe.py %*
      ```
+   - If using virtual environments or Anaconda, make sure to change `python` to the full path of the environment e.g. `C:\path\to\python.exe`
    - Save the file in a directory that's in your PATH (e.g., `C:\Windows`)
 
 3. Alternatively, you can create a PowerShell function by adding this to your PowerShell profile:
@@ -34,12 +40,7 @@ A cross-platform command-line reminder utility that should work on Windows, macO
    ```
 
 4. For Windows Run (Win+R) access:
-   - Create a new batch file named `remindme.bat` with the following content:
-     ```
-     @echo off
-     python "C:\full\path\to\remindMe.py" %*
-     pause
-     ```
+   - Create a new batch file named `remindme.bat` as mentioned in step 2:
    - Place this batch file in a location that is in your system PATH
      - To check your PATH directories, open Command Prompt and type: `echo %PATH%`
      - Or create a directory like `C:\bin\` and add it to your PATH:
@@ -95,7 +96,7 @@ remindme buy milk at 3pm
 ```
 
 ```
-remindme check the oven in 10 seconds
+remindme get a life on 1st Jan 2050
 ```
 
 ### Supported Time Formats
@@ -156,5 +157,5 @@ The application maintains a log file at:
 
 - ~~Current script hogs the terminal - to change implementation method~~
 - ~~Fix windows, and perhaps link to quick cmd run win+r~~
-- Add more parsing support for reminders beyond the day
+~~- Add more parsing support for reminders beyond the day~~
 - Perhaps shift out reminderNotifier as shell script for macOS/Linux, compare resources used.
