@@ -8,7 +8,7 @@ import os
 import logging
 import json
 import subprocess
-import dateparser
+from reminderParser import parse_reminder
 from pathlib import Path
 
 # Set up logging
@@ -24,7 +24,7 @@ file_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(mes
 # Custom filter for reminder history logs
 class ReminderHistoryFilter(logging.Filter):
     def filter(self, record):
-        return ('Reminder saved to trigger at' in record.getMessage() or 
+        return ('Reminder saved to trigger at' in record.getMessage() or
                 'Triggered:' in record.getMessage())
 
 # Set up history log handler with custom filter
@@ -61,163 +61,12 @@ def save_reminders(reminders):
     with open(reminders_file, 'w') as f:
         json.dump(reminders, f, indent=4)
 
-def extract_time_expression(text):
-    """
-    Extract time expressions from text using common patterns.
-    Returns a tuple of (time_expression, remaining_text)
-    """
-    # Common time patterns - tried to add more specific matching
-    patterns = [
-        # at/on time and date patterns - more comprehensive
-        r'(?:at|on)\s+(\d{1,2}(?:st|nd|rd|th)?(?:\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?)?(?:\s+(?:at\s+)?\d{1,2}(?::\d{2})?(?:\s*(?:am|pm))?)?)',
-        
-        # date with time patterns - more complete
-        r'(\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?(?:\s+(?:at\s+)?\d{1,2}(?::\d{2})?(?:\s*(?:am|pm))?)?)',
-        
-        # "in X minutes/hours/days" patterns
-        r'(?:in|after)\s+((?:\d+\s*(?:second|minute|hour|day|week|month|year|sec|min|hr|s|m|h|d|w|y)s?\s*(?:and\s+)?)+)',
-        
-        # simple time patterns
-        r'(?:at\s+)?(\d{1,2}(?::\d{2})?\s*(?:am|pm))',
-        
-        # later expressions
-        r'(later\s+(?:in|at|on)\s+\d+\s*(?:second|minute|hour|day|week|month|year|sec|min|hr|s|m|h|d|w|y)s?)',
-        
-        # by date patterns
-        r'(?:by|before)\s+(\d{1,2}(?:st|nd|rd|th)?(?:\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?)?(?:\s+(?:at\s+)?\d{1,2}(?::\d{2})?(?:\s*(?:am|pm))?)?)',
-        
-        # tomorrow, today patterns
-        r'(tomorrow(?:\s+(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?)',
-        r'(today(?:\s+(?:at|by)\s+\d{1,2}(?::\d{2})?\s*(?:am|pm)?)?)',
-    ]
-    
-    original_text = text.strip()
-    
-    # Specially handle cases like "on 1 May 11am" which might be problematic
-    special_date_pattern = r'(?:on|at|by)\s+(\d{1,2}(?:st|nd|rd|th)?\s+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?(?:\s+(?:at\s+)?\d{1,2}(?::\d{2})?(?:\s*(?:am|pm))?)?)'
-    special_match = re.search(special_date_pattern, text, re.IGNORECASE)
-    if special_match:
-        full_match = special_match.group(0)
-        remaining_text = text.replace(full_match, "").strip()
-        return full_match, remaining_text
-    
-    # Try each pattern
-    for pattern in patterns:
-        match = re.search(pattern, text, re.IGNORECASE)
-        if match:
-            # Get the full matched expression
-            full_match = match.group(0)
-            # Remove it from the original text to get remaining text
-            remaining_text = text.replace(full_match, "").strip()
-            return full_match, remaining_text
-    
-    # If no patterns matched, return the original text
-    return None, original_text
-
-def parse_reminder(text):
-    """
-    Parse reminder text to extract message and time using both patterns and dateparser.
-    Handles more natural language expressions.
-    """
-    # First try to extract time expression using patterns
-    time_expression, remaining_text = extract_time_expression(text)
-    
-    logger.debug(f"Extracted time expression: '{time_expression}', remaining text: '{remaining_text}'")
-    
-    # Initialize trigger_time as None
-    trigger_time = None
-    
-    if time_expression:
-        # Try parsing the full time expression first
-        trigger_time = dateparser.parse(
-            time_expression, 
-            settings={
-                'PREFER_DATES_FROM': 'future',
-                'RELATIVE_BASE': datetime.datetime.now(),
-                'TIMEZONE': 'local',
-                'DATE_ORDER': 'DMY'  # Force day-month-year interpretation
-            }
-        )
-        
-        logger.debug(f"Initial parse of time expression: {trigger_time}")
-        
-        # If we didn't get a valid time or if it defaulted to midnight but contains AM/PM
-        if not trigger_time or (trigger_time.hour == 0 and trigger_time.minute == 0 and 
-                               ('am' in time_expression.lower() or 'pm' in time_expression.lower())):
-            
-            # Look for date and time components separately
-            date_match = re.search(r'(\d{1,2}(?:st|nd|rd|th)?[\s]+(?:January|February|March|April|May|June|July|August|September|October|November|December|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)(?:\s+\d{4})?)', time_expression, re.IGNORECASE)
-            time_match = re.search(r'(\d{1,2}(?::\d{2})?[\s]*(?:am|pm))', time_expression, re.IGNORECASE)
-            
-            if date_match and time_match:
-                date_part = date_match.group(1)
-                time_part = time_match.group(1)
-                
-                logger.debug(f"Found date part: '{date_part}', time part: '{time_part}'")
-                
-                # Parse date first
-                date_obj = dateparser.parse(
-                    date_part,
-                    settings={
-                        'PREFER_DATES_FROM': 'future',
-                        'RELATIVE_BASE': datetime.datetime.now(),
-                        'TIMEZONE': 'local',
-                        'DATE_ORDER': 'DMY'
-                    }
-                )
-                
-                # Then parse time
-                time_obj = dateparser.parse(
-                    time_part,
-                    settings={
-                        'PREFER_DATES_FROM': 'future',
-                        'RELATIVE_BASE': datetime.datetime.now(),
-                        'TIMEZONE': 'local'
-                    }
-                )
-                
-                # Combine them if both were successfully parsed
-                if date_obj and time_obj:
-                    trigger_time = date_obj.replace(
-                        hour=time_obj.hour,
-                        minute=time_obj.minute,
-                        second=0
-                    )
-                    logger.debug(f"Combined date {date_obj.date()} with time {time_obj.hour}:{time_obj.minute}")
-        
-        message = remaining_text if remaining_text else "Reminder"
-        
-    else:
-        # Try to parse the whole text if no specific time expression was found
-        trigger_time = dateparser.parse(
-            text, 
-            settings={
-                'PREFER_DATES_FROM': 'future',
-                'RELATIVE_BASE': datetime.datetime.now(),
-                'TIMEZONE': 'local',
-                'DATE_ORDER': 'DMY'
-            }
-        )
-        message = text
-        time_expression = text
-    
-    # If we successfully found a trigger time
-    if trigger_time:
-        logger.debug(f"Final parsed time: {trigger_time.isoformat()}")
-        return {
-            'trigger_time': trigger_time,
-            'message': message,
-            'time_expression': time_expression
-        }
-    else:
-        logger.error(f"Failed to parse time from: '{text}'")
-        return None
 
 def format_time_until(target_time):
     """Format the time difference between now and target time in a human-readable way."""
     now = datetime.datetime.now()
     seconds_until = (target_time - now).total_seconds()
-    
+
     if seconds_until < 60:
         return f"{int(seconds_until)} seconds"
     elif seconds_until < 3600:
@@ -246,29 +95,29 @@ def view_logs(count=10, history=False):
     """View the most recent log entries."""
     try:
         log_path = history_log_file if history else log_file
-        
+
         if not os.path.exists(log_path):
             print(f"No log file found at {log_path}")
             return
-            
+
         with open(log_path, 'r') as f:
             lines = f.readlines()
-            
+
         if not lines:
             print("Log file exists but is empty.")
             return
-            
+
         # Show the last N entries
         log_type = "reminder history" if history else "reminder log"
         print(f"\nRecent {log_type} entries (from {log_path}):")
         print("---------------------------------------------------")
-        
+
         # If there are fewer lines than requested, show all of them
         display_count = min(count, len(lines))
-        
+
         for line in lines[-display_count:]:
             print(line.strip())
-            
+
     except Exception as e:
         print(f"Error reading log file: {str(e)}")
 
@@ -281,12 +130,12 @@ def is_notifier_running():
             # Read the process ID from the lock file
             with open(lock_file, 'r') as f:
                 pid = int(f.read().strip())
-            
+
             # Check if the process with that PID is still running
             if platform.system() == "Windows":
                 try:
                     # Using Windows tasklist command to check if process exists
-                    output = subprocess.check_output(["tasklist", "/FI", f"PID eq {pid}", "/NH"], 
+                    output = subprocess.check_output(["tasklist", "/FI", f"PID eq {pid}", "/NH"],
                                                     creationflags=subprocess.CREATE_NO_WINDOW,
                                                     stderr=subprocess.DEVNULL)
                     print(f"This is {str(pid) in output.decode()}")
@@ -308,7 +157,7 @@ def is_notifier_running():
             except:
                 pass
             return False
-    
+
     # If we get here, either there's no lock file or we couldn't verify the process
     # Do a more thorough check based on platform
     if platform.system() == "Windows":
@@ -328,7 +177,7 @@ def is_notifier_running():
     else:
         try:
             # Using pgrep to find the process
-            process = subprocess.run(['pgrep', '-f', 'reminderNotifier.py'], 
+            process = subprocess.run(['pgrep', '-f', 'reminderNotifier.py'],
                                     capture_output=True, text=True)
             return bool(process.stdout.strip())
         except subprocess.CalledProcessError:
@@ -341,35 +190,35 @@ def start_notifier_script():
     """Starts reminderNotifier.py script in background"""
     try:
         script_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "reminderNotifier.py")
-        
+
         if not os.path.exists(script_path):
             print(f"Error: Cannot find reminderNotifier.py at {script_path}")
             logger.error(f"reminderNotifier.py not found at {script_path}")
             return False
-            
+
         if platform.system() == "Windows":
             # Hide the console window when starting the process
             startupinfo = subprocess.STARTUPINFO()
             startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            
+
             process = subprocess.Popen(
-                ['python', script_path], 
-                startupinfo=startupinfo, 
+                ['python', script_path],
+                startupinfo=startupinfo,
                 creationflags=subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS,
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE
             )
         else:
             process = subprocess.Popen(
-                ['python', script_path], 
-                stdout=subprocess.DEVNULL, 
+                ['python', script_path],
+                stdout=subprocess.DEVNULL,
                 stderr=subprocess.DEVNULL
             )
-        
+
         # Create a lock file with the process ID
         with open(lock_file, 'w') as f:
             f.write(str(process.pid))
-            
+
         logger.info(f"reminderNotifier.py script started in background with PID {process.pid}.")
         print("Reminder service started in background.")
         return True
@@ -383,14 +232,14 @@ def process_reminder(reminder_text, full_command):
     """Process a reminder request using enhanced natural language parsing."""
     # Log the input
     logger.info(f"Reminder requested with input: '{reminder_text}'")
-    
+
     # Parse the reminder text
     reminder_info = parse_reminder(reminder_text)
-    
+
     if not reminder_info:
         print("Could not understand the time format. Please use natural language expressions like:")
         print("- 'call mom at 5pm'")
-        print("- 'buy milk on 28 April'") 
+        print("- 'buy milk on 28 April'")
         print("- 'meeting tomorrow at 2pm'")
         print("- 'dentist appointment on 15th May 2025 at 10am'")
         print("- 'check oven in 30 minutes'")
@@ -399,12 +248,12 @@ def process_reminder(reminder_text, full_command):
 
     # Get the trigger time
     trigger_time = reminder_info['trigger_time']
-    
+
     if trigger_time is None:
         print("Could not calculate when to trigger the reminder.")
         logger.error("Failed to calculate trigger time")
         return False
-    
+
     # Make sure the trigger time is in the future
     now = datetime.datetime.now()
     if trigger_time <= now:
@@ -416,7 +265,7 @@ def process_reminder(reminder_text, full_command):
             print("The specified time appears to be in the past.")
             logger.error(f"Trigger time in the past: {trigger_time.isoformat()}")
             return False
-    
+
     trigger_time_str = trigger_time.strftime('%Y-%m-%d %H:%M:%S')
 
     # Prepare reminder data
@@ -442,14 +291,14 @@ def process_reminder(reminder_text, full_command):
 def main():
     # Create the argument parser
     parser = argparse.ArgumentParser(description='Set a reminder from the command line.')
-    
+
     # Add the optional log arguments
     parser.add_argument('--log', action='store_true', help='View log entries')
     parser.add_argument('--history', action='store_true', help='View reminder history logs')
-    
+
     # Parse known args first to check for --log and --history
     args, unknown = parser.parse_known_args()
-    
+
     # If --log is specified, show logs and exit
     if args.log:
         view_logs(history=False)
@@ -463,7 +312,7 @@ def main():
     # Check if notifier script is running, start if not
     if not is_notifier_running():
         start_notifier_script()
-    
+
     # Handle the case for setting a reminder
     if unknown:
         # Join all remaining arguments to form the complete reminder text
@@ -478,11 +327,11 @@ if __name__ == "__main__":
     # Print a welcome message
     print("Reminder Tool - Cross-platform CLI reminder utility")
     print("---------------------------------------------------")
-    
+
     # Print log file location
     print(f"Log file: {log_file}")
     print(f"History log file: {history_log_file}")
     print(f"Reminder Storage: {reminders_file}")
     print("---------------------------------------------------")
-    
+
     main()
