@@ -137,10 +137,11 @@ The application maintains a log file at:
 
 - If the reminder doesn't trigger at the expected time, check if your system's time is correctly set
 - For any parsing errors, make sure you're using one of the supported time formats
+- Script will not auto run when system reboots. You'll need to manually run it again.
 
 ## TODOs
 
 - ~~Current script hogs the terminal - to change implementation method~~
 - ~~Fix windows, and perhaps link to quick cmd run win+r~~
-- ~~ Add more parsing support for reminders beyond the day~~
+- ~~Add more parsing support for reminders beyond the day~~
 - Perhaps shift out reminderNotifier as shell script for macOS/Linux, compare resources used.
